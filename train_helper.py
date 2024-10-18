@@ -31,7 +31,7 @@ class Trainer(object):
         # Add Google Drive mounting
         try:
             drive.mount('/content/drive')
-            self.drive_dir = '/content/drive/MyDrive/model_checkpoints'
+            self.drive_dir = '/content/drive/MyDrive/UCF-QNRF_ECCV18/'
             if not os.path.exists(self.drive_dir):
                 os.makedirs(self.drive_dir)
         except:
@@ -259,5 +259,12 @@ class Trainer(object):
             self.logger.info("save best mse {:.2f} mae {:.2f} model epoch {}".format(self.best_mse,
                                                                                      self.best_mae,
                                                                                      self.epoch))
-            torch.save(model_state_dic, os.path.join(self.save_dir, 'best_model_{}.pth'.format(self.best_count)))
+            best_model_path = os.path.join(self.save_dir, 'best_model_{}.pth'.format(self.best_count))
+            torch.save(model_state_dic, best_model_path)
             self.best_count += 1
+            
+            # Copy the best model to Google Drive
+            if hasattr(self, 'drive_dir'):  # Check if Google Drive is mounted
+                drive_path = os.path.join(self.drive_dir, 'best_model_{}.pth'.format(self.best_count - 1))
+                os.system(f'cp "{best_model_path}" "{drive_path}"')
+                self.logger.info(f'Saved best model to Google Drive: {drive_path}')
