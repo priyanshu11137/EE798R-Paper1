@@ -31,11 +31,12 @@ class Trainer(object):
         # Add Google Drive mounting
         try:
             drive.mount('/content/drive')
-            self.drive_dir = '/content/drive/MyDrive/UCF-QNRF_ECCV18/'
+            self.drive_dir = '/content/drive/MyDrive/UCF-QNRF_ECCV18/model_checkpoints'
             if not os.path.exists(self.drive_dir):
                 os.makedirs(self.drive_dir)
-        except:
-            print("Google Drive not available. Models will only be saved locally.")
+        except Exception as e:
+            print(f"Google Drive mounting failed: {e}")
+            self.drive_dir = None  # Google Drive not available
 
     def setup(self):
         args = self.args
@@ -113,6 +114,10 @@ class Trainer(object):
 
     def save_to_drive(self):
         """Save current checkpoint to Google Drive"""
+        if self.drive_dir is None:
+            self.logger.info("Skipping Google Drive save as it is not available.")
+            return
+        
         sub_dir = 'input-{}_wot-{}_wtv-{}_reg-{}_nIter-{}_normCood-{}'.format(
             self.args.crop_size, self.args.wot, self.args.wtv, self.args.reg, 
             self.args.num_of_iter_in_ot, self.args.norm_cood)
@@ -127,6 +132,8 @@ class Trainer(object):
             dest_path = os.path.join(drive_path, f'{self.epoch}_ckpt.tar')
             os.system(f'cp "{src_path}" "{dest_path}"')
             self.logger.info(f'Saved checkpoint to Google Drive: {dest_path}')
+        else:
+            self.logger.info(f"Checkpoint not found at: {src_path}")
 
     def download_model(self, epoch=None, best=False):
         """Download model checkpoint to local machine"""
@@ -219,7 +226,7 @@ class Trainer(object):
                         np.sqrt(epoch_mse.get_avg()), epoch_mae.get_avg(),
                         time.time() - epoch_start))
 
-        # Add saving to drive every 5 epochs
+        # Add saving to drive every 10 epochs
         if self.epoch % 10 == 0:
             self.save_to_drive()
 
@@ -264,7 +271,7 @@ class Trainer(object):
             self.best_count += 1
             
             # Copy the best model to Google Drive
-            if hasattr(self, 'drive_dir'):  # Check if Google Drive is mounted
+            if self.drive_dir is not None:  # Check if Google Drive is mounted
                 drive_path = os.path.join(self.drive_dir, 'best_model_{}.pth'.format(self.best_count - 1))
                 os.system(f'cp "{best_model_path}" "{drive_path}"')
                 self.logger.info(f'Saved best model to Google Drive: {drive_path}')
