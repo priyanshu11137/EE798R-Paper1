@@ -220,7 +220,7 @@ class Trainer(object):
                         time.time() - epoch_start))
 
         # Add saving to drive every 5 epochs
-        if self.epoch % 5 == 0:
+        if self.epoch % 10 == 0:
             self.save_to_drive()
 
         # Original saving code remains unchanged
