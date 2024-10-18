@@ -20,7 +20,7 @@ def train_collate(batch):
     images = torch.stack(transposed_batch[0], 0)
     points = transposed_batch[1]  # the number of points is not fixed, keep it as a list of tensor
     gt_discretes = torch.stack(transposed_batch[2], 0)
-    return images, points, gt_discrte
+    return images, points, gt_discretes
 
 class Trainer(object):
     def __init__(self, args):
