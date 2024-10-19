@@ -7,8 +7,6 @@ from torch.utils.data import DataLoader
 from torch.utils.data.dataloader import default_collate
 import numpy as np
 from datetime import datetime
-from google.colab import drive
-from google.colab import files
 
 from datasets.crowd import Crowd_qnrf, Crowd_nwpu, Crowd_sh
 from models import vgg19
@@ -28,15 +26,6 @@ def train_collate(batch):
 class Trainer(object):
     def __init__(self, args):
         self.args = args
-        # Add Google Drive mounting
-        try:
-            drive.mount('/content/drive')
-            self.drive_dir = '/content/drive/MyDrive/UCF-QNRF_ECCV18/model_checkpoints'
-            if not os.path.exists(self.drive_dir):
-                os.makedirs(self.drive_dir)
-        except Exception as e:
-            print(f"Google Drive mounting failed: {e}")
-            self.drive_dir = None  # Google Drive not available
 
     def setup(self):
         args = self.args
@@ -112,48 +101,6 @@ class Trainer(object):
         self.best_mse = np.inf
         self.best_count = 0
 
-    def save_to_drive(self):
-        """Save current checkpoint to Google Drive"""
-        if self.drive_dir is None:
-            self.logger.info("Skipping Google Drive save as it is not available.")
-            return
-        
-        sub_dir = 'input-{}_wot-{}_wtv-{}_reg-{}_nIter-{}_normCood-{}'.format(
-            self.args.crop_size, self.args.wot, self.args.wtv, self.args.reg, 
-            self.args.num_of_iter_in_ot, self.args.norm_cood)
-        
-        drive_path = os.path.join(self.drive_dir, sub_dir)
-        if not os.path.exists(drive_path):
-            os.makedirs(drive_path)
-            
-        # Copy current checkpoint to Drive
-        src_path = os.path.join(self.save_dir, f'{self.epoch}_ckpt.tar')
-        if os.path.exists(src_path):
-            dest_path = os.path.join(drive_path, f'{self.epoch}_ckpt.tar')
-            os.system(f'cp "{src_path}" "{dest_path}"')
-            self.logger.info(f'Saved checkpoint to Google Drive: {dest_path}')
-        else:
-            self.logger.info(f"Checkpoint not found at: {src_path}")
-
-    def download_model(self, epoch=None, best=False):
-        """Download model checkpoint to local machine"""
-        if best:
-            model_path = os.path.join(self.save_dir, f'best_model_{self.best_count-1}.pth')
-            if os.path.exists(model_path):
-                files.download(model_path)
-                self.logger.info(f'Downloaded best model: best_model_{self.best_count-1}.pth')
-            else:
-                self.logger.info('Best model file not found')
-        elif epoch is not None:
-            model_path = os.path.join(self.save_dir, f'{epoch}_ckpt.tar')
-            if os.path.exists(model_path):
-                files.download(model_path)
-                self.logger.info(f'Downloaded checkpoint from epoch {epoch}')
-            else:
-                self.logger.info(f'Checkpoint for epoch {epoch} not found')
-        else:
-            self.logger.info('Please specify epoch number or set best=True')
-
     def train(self):
         """training process"""
         args = self.args
@@ -225,12 +172,6 @@ class Trainer(object):
                         epoch_ot_obj_value.get_avg(), epoch_count_loss.get_avg(), epoch_tv_loss.get_avg(),
                         np.sqrt(epoch_mse.get_avg()), epoch_mae.get_avg(),
                         time.time() - epoch_start))
-
-        # Add saving to drive every 10 epochs
-        if self.epoch % 10 == 0:
-            self.save_to_drive()
-
-        # Original saving code remains unchanged
         model_state_dic = self.model.state_dict()
         save_path = os.path.join(self.save_dir, '{}_ckpt.tar'.format(self.epoch))
         torch.save({
@@ -266,12 +207,5 @@ class Trainer(object):
             self.logger.info("save best mse {:.2f} mae {:.2f} model epoch {}".format(self.best_mse,
                                                                                      self.best_mae,
                                                                                      self.epoch))
-            best_model_path = os.path.join(self.save_dir, 'best_model_{}.pth'.format(self.best_count))
-            torch.save(model_state_dic, best_model_path)
+            torch.save(model_state_dic, os.path.join(self.save_dir, 'best_model_{}.pth'.format(self.best_count)))
             self.best_count += 1
-            
-            # Copy the best model to Google Drive
-            if self.drive_dir is not None:  # Check if Google Drive is mounted
-                drive_path = os.path.join(self.drive_dir, 'best_model_{}.pth'.format(self.best_count - 1))
-                os.system(f'cp "{best_model_path}" "{drive_path}"')
-                self.logger.info(f'Saved best model to Google Drive: {drive_path}')
