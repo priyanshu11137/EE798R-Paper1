@@ -1,34 +1,35 @@
 # DM-Count: Distribution Matching for Crowd Counting
 
-This repository contains the implementation of DM-Count, a novel method for crowd counting that leverages Optimal Transport (OT) to match predicted and ground-truth density distributions. The repository is developed with the aim to reproduce the results from the paper as part of course project and agin understanding of Desnity Distribution Analysis techniques.
+This repository contains the implementation of DM-Count, a novel method for crowd counting that leverages Optimal Transport (OT) to match predicted and ground-truth density distributions.
 
-## Summary of the Paper
+## Running the Code
 
-DM-Count introduces a new approach to crowd counting by avoiding Gaussian smoothing of dot annotations and using Optimal Transport (OT) and Total Variation (TV) losses. The paper shows previous state of the art models which use imposing Gaussian annotations hurt generalization perfiormance of crowd counting network. Primary reason of annotating dot into a Gaussian blob is to make ground truth more balanced making it easier to train the model but paper emphasizes that the performance is now dependant on "quality of this “pseudo ground truth”" and it is non-trivial to set right widhts of gaussian blobs specially in crowded scenes. Another approach in previous state of art results was Bayesian Loss in this Each pixel value of a smoothed ground truth density map is the posterior probability of the corresponding annotation dot given the location of that pixel. The paper points two major problems with this approach and these are First, it also requires a Gaussian kernel to construct the likelihood function for each annotated dot, which involves setting the kernel width. Second, this loss corresponds to an underdetermined system of equations with infinitely many solutions  Therefore, the predicted density map could be very different from the ground truth density map. Hence the paper propses using combination of counting loss, scaled optimal Transport Loss(optimal cost to transform one probability distribution to another) optimized using Sinkhorn algorithm and scaled Total variation Loss (for low density areas and increasing stability of training procedure) to train a deep neural network f for density map estimation by minimizing L(f)=1/K
-The paper shows superior performance in both dense and sparse crowd scenarios across major datasets.
+### Preprocess the dataset:
+```
+python preprocess_dataset.py --dataset <dataset name: qnrf or nwpu> --input-dataset-path <original data directory> --output-dataset-path <processed data directory>
+```
 
-## Features
-
-- Avoids limitations of Gaussian smoothing methods
-- Uses Optimal Transport for direct density distribution comparison
-- Incorporates Total Variation loss for training stability
-- State-of-the-art performance on major crowd counting datasets
+### Train the Dataset:
+```
+python train.py --dataset <dataset name: qnrf, sha, shb or nwpu> --data-dir <path to dataset> --device <gpu device id>
+```
+### Test the Model:
+```
+python test.py --model-path <path of the model to be evaluated> --data-path <directory for the dataset> --dataset <dataset name: qnrf, sha, shb or nwpu>
+```
 
 ## Datasets
-
 The method has been tested on the following datasets:
++ QNRF can be downloaded [here](https://www.crcv.ucf.edu/data/ucf-qnrf/)
++ Shanghai Tech Part A and Part B can be downloaded [here](https://www.kaggle.com/tthien/shanghaitech)
 
-- UCF-QNRF
-- NWPU
-- ShanghaiTech (Part A and B)
-- UCF-CC-50
+## Pre-Trained Models
+The method has been tested on the following datasets:
++ QNRF can be downloaded [here](https://www.crcv.ucf.edu/data/ucf-qnrf/)
++ Shanghai Tech Part A and Part B can be downloaded [here](https://www.kaggle.com/tthien/shanghaitech)
 
-## Results
+## Official Implementation
+The official GitHub repository mentioned in the paper is: https://github.com/cvlab-stonybrook/DM-Count
 
-DM-Count achieves state-of-the-art results on various datasets. For example:
+This repository is a rewrite of the project with the aim to reproduce the results and gain a better understanding of Density Distribution Analysis techniques.
 
-- NWPU: MAE reduced from 105.4 to 88.4 (16% improvement) at that time.
-- Improved PSNR and SSIM metrics compared to Pixel wise and Bayesian Loss, indicating sharper and more accurate density maps
-
-## Implementation
-Official github repo(mentioned in paper):https://github.com/cvlab-stonybrook/DM-Count
