@@ -114,5 +114,8 @@ if __name__ == "__main__":
     # Perform prediction
     original_image, density_map, predicted_count = predict(args.img_path, model, device)
 
+    # Print the predicted count
+    print(f"Predicted Count: {predicted_count}")
+
     # Save the results
     save_results(original_image, density_map, predicted_count)
