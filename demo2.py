@@ -63,15 +63,18 @@ def show_images(original_image, density_map, predicted_count):
     # Show original image
     plt.subplot(1, 2, 1)
     plt.imshow(original_image)
+    plt.axis('off')  # Hide axis for better display
     plt.title('Original Image')
 
     # Show density map
     plt.subplot(1, 2, 2)
     plt.imshow(density_map)
+    plt.axis('off')  # Hide axis for better display
     plt.title(f'Density Map\n{predicted_count}')
 
     # Show the plots
-    plt.show()
+    plt.show()  # Make sure to use plt.show() in Colab for image display
+
 
 if __name__ == "__main__":
     # Argument parser setup
