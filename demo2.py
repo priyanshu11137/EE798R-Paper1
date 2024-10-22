@@ -7,10 +7,7 @@ import cv2
 import numpy as np
 import os
 import argparse
-import matplotlib.pyplot as plt
-
-# Ensure inline plotting for Colab
-%matplotlib inline
+import matplotlib.pyplot as plt  # Add this import for displaying images
 
 # Function to download model if not exists
 def download_model_if_not_exists(model_path, url):
@@ -59,20 +56,18 @@ def predict(image_path, model, device):
     
     return np.array(inp), vis_img, f"Predicted Count: {int(count)}"
 
-# Display images using matplotlib in Colab
 def show_images(original_image, density_map, predicted_count):
+    # Display the original image and the density map using matplotlib
     plt.figure(figsize=(10, 5))
 
     # Show original image
     plt.subplot(1, 2, 1)
     plt.imshow(original_image)
-    plt.axis('off')  # Hide axis for better display
     plt.title('Original Image')
 
     # Show density map
     plt.subplot(1, 2, 2)
     plt.imshow(density_map)
-    plt.axis('off')  # Hide axis for better display
     plt.title(f'Density Map\n{predicted_count}')
 
     # Show the plots
