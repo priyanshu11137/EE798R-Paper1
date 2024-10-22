@@ -4,3 +4,5 @@ opencv-python
 gdown
 pillow
 gradio
+scikit-learn
+matplotlib
