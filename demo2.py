@@ -7,15 +7,12 @@ import cv2
 import numpy as np
 import os
 import argparse
-import matplotlib.pyplot as plt  # Add this import for displaying images
 
-# Function to download model if not exists
 def download_model_if_not_exists(model_path, url):
     if not os.path.exists(model_path):
         os.makedirs(os.path.dirname(model_path), exist_ok=True)
         gdown.download(url, model_path, quiet=False)
 
-# Function to load the model
 def load_model(model_path, device):
     model = vgg19()
     checkpoint = torch.load(model_path, map_location=device)
@@ -29,7 +26,6 @@ def load_model(model_path, device):
     model.eval()
     return model
 
-# Prediction function
 def predict(image_path, model, device):
     # Load image
     inp = Image.open(image_path).convert('RGB')
@@ -52,26 +48,47 @@ def predict(image_path, model, device):
     vis_img = (vis_img - vis_img.min()) / (vis_img.max() - vis_img.min() + 1e-5)
     vis_img = (vis_img * 255).astype(np.uint8)
     vis_img = cv2.applyColorMap(vis_img, cv2.COLORMAP_JET)
-    vis_img = cv2.cvtColor(vis_img, cv2.COLOR_BGR2RGB)
     
-    return np.array(inp), vis_img, f"Predicted Count: {int(count)}"
+    return np.array(inp), vis_img, int(count)
 
-def show_images(original_image, density_map, predicted_count):
-    # Display the original image and the density map using matplotlib
-    plt.figure(figsize=(10, 5))
+def save_results(original_image, density_map, count):
+    # Convert original image from RGB to BGR for OpenCV
+    original_bgr = cv2.cvtColor(original_image, cv2.COLOR_RGB2BGR)
+    
+    # Add text with count to density map
+    height, width = density_map.shape[:2]
+    text = f"Predicted Count: {count}"
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 1
+    thickness = 2
+    text_size = cv2.getTextSize(text, font, font_scale, thickness)[0]
+    text_x = (width - text_size[0]) // 2
+    text_y = height - 20
+    cv2.putText(density_map, text, (text_x, text_y), font, font_scale, (255, 255, 255), thickness)
 
-    # Show original image
-    plt.subplot(1, 2, 1)
-    plt.imshow(original_image)
-    plt.title('Original Image')
-
-    # Show density map
-    plt.subplot(1, 2, 2)
-    plt.imshow(density_map)
-    plt.title(f'Density Map\n{predicted_count}')
-
-    # Show the plots
-    plt.show()
+    # Create a white border between images
+    border_size = 10
+    border_color = (255, 255, 255)
+    
+    # Ensure both images have the same height
+    max_height = max(original_bgr.shape[0], density_map.shape[0])
+    original_resized = cv2.resize(original_bgr, (int(original_bgr.shape[1] * max_height / original_bgr.shape[0]), max_height))
+    density_resized = cv2.resize(density_map, (int(density_map.shape[1] * max_height / density_map.shape[0]), max_height))
+    
+    # Create combined image with border
+    combined_width = original_resized.shape[1] + density_resized.shape[1] + border_size
+    combined_height = max_height
+    combined_image = np.ones((combined_height, combined_width, 3), dtype=np.uint8) * 255
+    
+    # Place images in combined image
+    combined_image[:, :original_resized.shape[1]] = original_resized
+    combined_image[:, -density_resized.shape[1]:] = density_resized
+    
+    # Save the combined image
+    output_path = 'crowd_counting_result.jpg'
+    cv2.imwrite(output_path, combined_image)
+    print(f"Results saved as '{output_path}'")
+    return output_path
 
 if __name__ == "__main__":
     # Argument parser setup
@@ -97,5 +114,5 @@ if __name__ == "__main__":
     # Perform prediction
     original_image, density_map, predicted_count = predict(args.img_path, model, device)
 
-    # Display the images directly
-    show_images(original_image, density_map, predicted_count)
+    # Save the results
+    save_results(original_image, density_map, predicted_count)
