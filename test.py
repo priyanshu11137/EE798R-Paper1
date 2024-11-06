@@ -3,19 +3,19 @@ import torch
 import os
 import numpy as np
 import datasets.crowd as crowd
-from models import vgg19
+from models import DMCount
 import multiprocessing
 
 def main():
-    parser = argparse.ArgumentParser(description='Test ')
+    parser = argparse.ArgumentParser(description='Test')
     parser.add_argument('--device', default='0', help='assign device')
     parser.add_argument('--crop-size', type=int, default=512,
-                        help='the crop size of the train image')
+                        help='the crop size of the test image')
     parser.add_argument('--model-path', type=str, default='pretrained_models/model_qnrf.pth',
                         help='saved model path')
     parser.add_argument('--data-path', type=str,
                         default='data/QNRF-Train-Val-Test',
-                        help='saved model path')
+                        help='path to dataset')
     parser.add_argument('--dataset', type=str, default='qnrf',
                         help='dataset name: qnrf, nwpu, sha, shb')
     parser.add_argument('--pred-density-map-path', type=str, default='',
@@ -23,7 +23,7 @@ def main():
 
     args = parser.parse_args()
 
-    os.environ['CUDA_VISIBLE_DEVICES'] = args.device  # set vis gpu
+    os.environ['CUDA_VISIBLE_DEVICES'] = args.device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     model_path = args.model_path
@@ -40,8 +40,7 @@ def main():
     else:
         raise NotImplementedError
 
-    dataloader = torch.utils.data.DataLoader(dataset, 1, shuffle=False,
-                                             num_workers=0, pin_memory=True)
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False, num_workers=0, pin_memory=True)
 
     if args.pred_density_map_path:
         import cv2
@@ -58,7 +57,7 @@ def main():
             model.load_state_dict(checkpoint)
         return model
 
-    model = vgg19()
+    model = DMCount()
     model = load_model(model, model_path, device)
     model.to(device)
     model.eval()
@@ -68,14 +67,19 @@ def main():
         inputs = inputs.to(device)
         assert inputs.size(0) == 1, 'the batch size should equal to 1'
         with torch.set_grad_enabled(False):
-            outputs, _ = model(inputs)
-        img_err = count[0].item() - torch.sum(outputs).item()
+            # Get multi-scale density maps from the model
+            (mu_4x4, _), (mu_8x8, _), (mu_16x16, _) = model(inputs)
+            
+            # Compute average predicted count across scales
+            pred_count = (torch.sum(mu_4x4).item() + torch.sum(mu_8x8).item() + torch.sum(mu_16x16).item()) / 3
+            img_err = count[0].item() - pred_count
 
-        print(name, img_err, count[0].item(), torch.sum(outputs).item())
+        print(name, img_err, count[0].item(), pred_count)
         image_errs.append(img_err)
 
         if args.pred_density_map_path:
-            vis_img = outputs[0, 0].cpu().numpy()
+            # Save the visualized density map for the largest scale (16x16)
+            vis_img = mu_16x16[0, 0].cpu().numpy()
             vis_img = (vis_img - vis_img.min()) / (vis_img.max() - vis_img.min() + 1e-5)
             vis_img = (vis_img * 255).astype(np.uint8)
             vis_img = cv2.applyColorMap(vis_img, cv2.COLORMAP_JET)
@@ -84,7 +88,7 @@ def main():
     image_errs = np.array(image_errs)
     mse = np.sqrt(np.mean(np.square(image_errs)))
     mae = np.mean(np.abs(image_errs))
-    print('{}: mae {}, mse {}\n'.format(model_path, mae, mse))
+    print('{}: MAE: {:.2f}, MSE: {:.2f}'.format(model_path, mae, mse))
 
 if __name__ == '__main__':
     multiprocessing.freeze_support()
