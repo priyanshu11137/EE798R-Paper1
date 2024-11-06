@@ -177,7 +177,8 @@ class Trainer:
         for step, (inputs, points, gt_discrete) in enumerate(self.dataloaders["train"]):
             inputs, gt_discrete = inputs.to(self.device), gt_discrete.to(self.device)
 
-            with autocast():  # Use autocast for mixed precision training
+            # Updated autocast to new syntax
+            with autocast('cuda'):  # Use autocast for mixed precision training
                 outputs, outputs_normed = self.model(inputs)
 
                 total_ot_loss = 0.0  
@@ -199,9 +200,9 @@ class Trainer:
                     total_tv_loss += tv_loss_i
 
                     # Update metrics for each image
-                    epoch_ot_loss.update(float(ot_loss_i))
-                    epoch_wd.update(float(wd_i))
-                    epoch_ot_obj_value.update(float(ot_obj_value_i))
+                    epoch_ot_loss.update(float(ot_loss_i))  # Convert to float
+                    epoch_wd.update(float(wd_i))            # Convert to float
+                    epoch_ot_obj_value.update(float(ot_obj_value_i))  # Convert to float
                     epoch_count_loss.update(float(total_count_loss))
                     epoch_tv_loss.update(float(tv_loss_i))
 
@@ -221,14 +222,14 @@ class Trainer:
             pred_err = pred_counts - gd_counts
             epoch_mse.update(np.mean(pred_err ** 2), len(pred_counts))
             epoch_mae.update(np.mean(np.abs(pred_err)), len(pred_counts))
-            epoch_loss.update(loss, len(pred_counts))
+            epoch_loss.update(float(loss), len(pred_counts))  # Convert loss to float
 
-        # Logging epoch results
+        # Logging epoch results with converted values to avoid tensor format error
         self.logger.info(
-            f"Epoch {self.epoch} Train, Loss: {epoch_loss.get_avg():.2f}, OT Loss: {epoch_ot_loss.get_avg():.2e}, "
-            f"Wass Distance: {epoch_wd.get_avg():.2f}, OT obj value: {epoch_ot_obj_value.get_avg():.2f}, "
-            f"Count Loss: {epoch_count_loss.get_avg():.2f}, TV Loss: {epoch_tv_loss.get_avg():.2f}, "
-            f"MSE: {np.sqrt(epoch_mse.get_avg()):.2f} MAE: {epoch_mae.get_avg():.2f}, Cost {time.time() - epoch_start:.1f} sec"
+            f"Epoch {self.epoch} Train, Loss: {float(epoch_loss.get_avg()):.2f}, OT Loss: {float(epoch_ot_loss.get_avg()):.2e}, "
+            f"Wass Distance: {float(epoch_wd.get_avg()):.2f}, OT obj value: {float(epoch_ot_obj_value.get_avg()):.2f}, "
+            f"Count Loss: {float(epoch_count_loss.get_avg()):.2f}, TV Loss: {float(epoch_tv_loss.get_avg()):.2f}, "
+            f"MSE: {np.sqrt(float(epoch_mse.get_avg())):.2f} MAE: {float(epoch_mae.get_avg()):.2f}, Cost {time.time() - epoch_start:.1f} sec"
         )
 
         # Save model checkpoint
