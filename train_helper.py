@@ -5,10 +5,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import optim
 from torch.utils.data import DataLoader
-from torch.utils.data.dataloader import default_collate
+from torch.cuda.amp import autocast, GradScaler
 import numpy as np
 from datetime import datetime
-from torch.cuda.amp import autocast, GradScaler  # For AMP
+from torch.utils.data.dataloader import default_collate
 
 from datasets.crowd import Crowd_qnrf, Crowd_nwpu, Crowd_sh
 from models import vgg19
@@ -100,70 +100,63 @@ class Trainer:
                 self.val_epoch()
 
     def compute_adaptive_hot_loss(self, outputs_i, outputs_normed_i, points_i):
-        # Define parameters for adaptive hierarchy and approximate OT
-        levels = [3]  # Levels of hierarchy, finer grids are used at deeper levels
-        depth_factor = 0.5  # Multiplier for regularization at coarse levels
-        iter_factor = 0.7   # Factor to reduce the number of iterations for coarser levels
-
-        total_ot_loss, total_wd, total_ot_obj_value = 0.0, 0.0, 0.0
+        # Determine the appropriate division based on output size
+        H_out, W_out = outputs_i.size(2), outputs_i.size(3)
         downsample_ratio = self.args.downsample_ratio
         points_i_array = points_i.clone().to(self.device)
 
-        for l, level in enumerate(levels):
-            num_cells_per_side = 2 ** level
-            H_cell = outputs_i.size(2) // num_cells_per_side
-            W_cell = outputs_i.size(3) // num_cells_per_side
+        if H_out > 8 and W_out > 8:
+            num_cells_per_side = 8  # Divide into 8x8 grid (64 cells)
+        elif H_out > 4 and W_out > 4:
+            num_cells_per_side = 4  # Divide into 4x4 grid (16 cells)
+        elif H_out > 2 and W_out > 2:
+            num_cells_per_side = 2  # Divide into 2x2 grid (4 cells)
+        else:
+            num_cells_per_side = 1  # No division if the image is very small
 
-            if H_cell == 0 or W_cell == 0:
-                continue
+        H_cell = H_out // num_cells_per_side
+        W_cell = W_out // num_cells_per_side
 
-            # Adjust OT parameters for approximate computation at coarse levels
-            level_reg = self.ot_loss.reg * (depth_factor ** l)
-            level_iters = max(1, int(self.ot_loss.num_of_iter_in_ot * (iter_factor ** l)))
+        total_ot_loss, total_wd, total_ot_obj_value = 0.0, 0.0, 0.0
 
-            for grid_y in range(num_cells_per_side):
-                for grid_x in range(num_cells_per_side):
-                    y_start, y_end = grid_y * H_cell, (grid_y + 1) * H_cell
-                    x_start, x_end = grid_x * W_cell, (grid_x + 1) * W_cell
+        for grid_y in range(num_cells_per_side):
+            for grid_x in range(num_cells_per_side):
+                y_start, y_end = grid_y * H_cell, (grid_y + 1) * H_cell
+                x_start, x_end = grid_x * W_cell, (grid_x + 1) * W_cell
 
-                    outputs_cell = outputs_i[:, :, y_start:y_end, x_start:x_end]
-                    outputs_normed_cell = outputs_normed_i[:, :, y_start:y_end, x_start:x_end]
+                outputs_cell = outputs_i[:, :, y_start:y_end, x_start:x_end]
+                outputs_normed_cell = outputs_normed_i[:, :, y_start:y_end, x_start:x_end]
 
-                    # Resize cells to match `self.ot_loss.output_size`
-                    if outputs_cell.size(2) != self.ot_loss.output_size or outputs_cell.size(3) != self.ot_loss.output_size:
-                        outputs_cell = F.interpolate(outputs_cell, size=(self.ot_loss.output_size, self.ot_loss.output_size), mode='bilinear', align_corners=False)
-                        outputs_normed_cell = F.interpolate(outputs_normed_cell, size=(self.ot_loss.output_size, self.ot_loss.output_size), mode='bilinear', align_corners=False)
+                # Resize cells to match `self.ot_loss.output_size` if needed
+                if outputs_cell.size(2) != self.ot_loss.output_size or outputs_cell.size(3) != self.ot_loss.output_size:
+                    outputs_cell = F.interpolate(outputs_cell, size=(self.ot_loss.output_size, self.ot_loss.output_size), mode='bilinear', align_corners=False)
+                    outputs_normed_cell = F.interpolate(outputs_normed_cell, size=(self.ot_loss.output_size, self.ot_loss.output_size), mode='bilinear', align_corners=False)
 
-                    y_start_img, y_end_img = y_start * downsample_ratio, y_end * downsample_ratio
-                    x_start_img, x_end_img = x_start * downsample_ratio, x_end * downsample_ratio
+                y_start_img, y_end_img = y_start * downsample_ratio, y_end * downsample_ratio
+                x_start_img, x_end_img = x_start * downsample_ratio, x_end * downsample_ratio
 
-                    in_cell_mask = (points_i_array[:, 1] >= y_start_img) & (points_i_array[:, 1] < y_end_img) & \
-                                (points_i_array[:, 0] >= x_start_img) & (points_i_array[:, 0] < x_end_img)
-                    points_cell = points_i_array[in_cell_mask]
+                # Select points within the current cell
+                in_cell_mask = (points_i_array[:, 1] >= y_start_img) & (points_i_array[:, 1] < y_end_img) & \
+                            (points_i_array[:, 0] >= x_start_img) & (points_i_array[:, 0] < x_end_img)
+                points_cell = points_i_array[in_cell_mask]
 
-                    if points_cell.shape[0] == 0:
-                        continue
+                if points_cell.shape[0] == 0:
+                    continue
 
-                    points_cell_normalized = points_cell.clone()
-                    points_cell_normalized[:, 0] = (points_cell[:, 0] - x_start_img) / downsample_ratio
-                    points_cell_normalized[:, 1] = (points_cell[:, 1] - y_start_img) / downsample_ratio
+                # Normalize points to cell coordinates
+                points_cell_normalized = points_cell.clone()
+                points_cell_normalized[:, 0] = (points_cell[:, 0] - x_start_img) / downsample_ratio
+                points_cell_normalized[:, 1] = (points_cell[:, 1] - y_start_img) / downsample_ratio
 
-                    # Call OT loss with modified parameters
-                    ot_loss = OT_Loss(
-                        c_size=self.args.crop_size,
-                        stride=downsample_ratio,
-                        norm_cood=self.args.norm_cood,
-                        device=self.device,
-                        num_of_iter_in_ot=level_iters,
-                        reg=level_reg
-                    )
-                    ot_loss_cell, wd_cell, ot_obj_value_cell = ot_loss(outputs_normed_cell, outputs_cell, [points_cell_normalized])
+                # Use OT loss for the current cell
+                ot_loss_cell, wd_cell, ot_obj_value_cell = self.ot_loss(outputs_normed_cell, outputs_cell, [points_cell_normalized])
 
-                    total_ot_loss += ot_loss_cell
-                    total_wd += wd_cell
-                    total_ot_obj_value += ot_obj_value_cell
+                total_ot_loss += ot_loss_cell
+                total_wd += wd_cell
+                total_ot_obj_value += ot_obj_value_cell
 
         return total_ot_loss, total_wd, total_ot_obj_value
+
 
     def train_epoch(self):
         args = self.args
@@ -177,7 +170,6 @@ class Trainer:
         for step, (inputs, points, gt_discrete) in enumerate(self.dataloaders["train"]):
             inputs, gt_discrete = inputs.to(self.device), gt_discrete.to(self.device)
 
-            # Updated autocast to new syntax
             with autocast():  # Use autocast for mixed precision training
                 outputs, outputs_normed = self.model(inputs)
 
@@ -193,26 +185,22 @@ class Trainer:
                     total_ot_loss += ot_loss_i * self.args.wot
                     total_count_loss += self.mae(outputs_i.sum().reshape(1), torch.tensor([len(points_i)], dtype=torch.float32).to(self.device))
 
-                    # Normalize gt_discrete and compute TV loss
                     gd_count_tensor_i = torch.tensor([len(points_i)], dtype=torch.float32).to(self.device).unsqueeze(1).unsqueeze(2).unsqueeze(3)
                     gt_discrete_normed_i = gt_discrete[i].unsqueeze(0) / (gd_count_tensor_i + 1e-6)
                     tv_loss_i = (self.tv_loss(outputs_normed_i, gt_discrete_normed_i).sum() * gd_count_tensor_i.item()).mean(0) * self.args.wtv
                     total_tv_loss += tv_loss_i
 
-                    # Update metrics for each image
-                    epoch_ot_loss.update(float(ot_loss_i))  # Convert to float
-                    epoch_wd.update(float(wd_i))            # Convert to float
-                    epoch_ot_obj_value.update(float(ot_obj_value_i))  # Convert to float
+                    epoch_ot_loss.update(float(ot_loss_i))
+                    epoch_wd.update(float(wd_i))
+                    epoch_ot_obj_value.update(float(ot_obj_value_i))
                     epoch_count_loss.update(float(total_count_loss))
                     epoch_tv_loss.update(float(tv_loss_i))
 
-                    # Store predicted and ground truth counts for error metrics
                     pred_counts.append(outputs_i.sum().item())
                     gd_counts.append(len(points_i))
 
                 loss = total_ot_loss + total_count_loss + total_tv_loss
 
-            # AMP scaling and optimizer step
             self.optimizer.zero_grad()
             self.scaler.scale(loss).backward()
             self.scaler.step(self.optimizer)
@@ -222,9 +210,8 @@ class Trainer:
             pred_err = pred_counts - gd_counts
             epoch_mse.update(np.mean(pred_err ** 2), len(pred_counts))
             epoch_mae.update(np.mean(np.abs(pred_err)), len(pred_counts))
-            epoch_loss.update(float(loss), len(pred_counts))  # Convert loss to float
+            epoch_loss.update(float(loss), len(pred_counts))
 
-        # Logging epoch results with converted values to avoid tensor format error
         self.logger.info(
             f"Epoch {self.epoch} Train, Loss: {float(epoch_loss.get_avg()):.2f}, OT Loss: {float(epoch_ot_loss.get_avg()):.2e}, "
             f"Wass Distance: {float(epoch_wd.get_avg()):.2f}, OT obj value: {float(epoch_ot_obj_value.get_avg()):.2f}, "
@@ -232,7 +219,6 @@ class Trainer:
             f"MSE: {np.sqrt(float(epoch_mse.get_avg())):.2f} MAE: {float(epoch_mae.get_avg()):.2f}, Cost {time.time() - epoch_start:.1f} sec"
         )
 
-        # Save model checkpoint
         model_state_dic = self.model.state_dict()
         save_path = os.path.join(self.save_dir, f"{self.epoch}_ckpt.tar")
         torch.save({
