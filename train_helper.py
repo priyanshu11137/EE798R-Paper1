@@ -178,7 +178,7 @@ class Trainer:
             inputs, gt_discrete = inputs.to(self.device), gt_discrete.to(self.device)
 
             # Updated autocast to new syntax
-            with autocast('cuda'):  # Use autocast for mixed precision training
+            with autocast():  # Use autocast for mixed precision training
                 outputs, outputs_normed = self.model(inputs)
 
                 total_ot_loss = 0.0  
