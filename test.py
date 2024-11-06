@@ -71,10 +71,13 @@ def main():
             (mu_4x4, _), (mu_8x8, _), (mu_16x16, _) = model(inputs)
             
             # Compute average predicted count across scales
-            pred_count = (torch.sum(mu_4x4).item() + torch.sum(mu_8x8).item() + torch.sum(mu_16x16).item()) / 3
+            a=torch.sum(mu_4x4).item()
+            b=torch.sum(mu_8x8).item()
+            c=torch.sum(mu_16x16).item()
+            pred_count = (a+b+c)/ 3
             img_err = count[0].item() - pred_count
 
-        print(name, img_err, count[0].item(), pred_count)
+        print(name, img_err, count[0].item(), pred_count, a, b, c)
         image_errs.append(img_err)
 
         if args.pred_density_map_path:
