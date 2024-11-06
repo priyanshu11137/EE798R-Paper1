@@ -101,7 +101,7 @@ class Trainer:
 
     def compute_adaptive_hot_loss(self, outputs_i, outputs_normed_i, points_i):
         # Define parameters for adaptive hierarchy and approximate OT
-        levels = [1, 2, 3]  # Levels of hierarchy, finer grids are used at deeper levels
+        levels = [3]  # Levels of hierarchy, finer grids are used at deeper levels
         depth_factor = 0.5  # Multiplier for regularization at coarse levels
         iter_factor = 0.7   # Factor to reduce the number of iterations for coarser levels
 
