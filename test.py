@@ -96,7 +96,7 @@ class Trainer:
             if epoch % args.val_epoch == 0 and epoch >= args.val_start:
                 self.val_epoch()
     def compute_hot_loss_single_image(self, outputs_i, outputs_normed_i, points_i):
-        levels = [0, 1, 2]  
+        levels = [2]  
         alpha = [0.5, 0.3, 0.2]  
         total_ot_loss, total_wd, total_ot_obj_value = 0, 0, 0
         downsample_ratio = self.args.downsample_ratio
