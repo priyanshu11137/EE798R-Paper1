@@ -25,9 +25,9 @@ class Trainer(object):
     def __init__(self, args):
         self.args = args
         self.scale_weights = {
-            '4x4':0.33,  # or some other default weight
-            '8x8':0.33,
-            '16x16':0.33
+            '4x4':0.5,  # or some other default weight
+            '8x8':0.3,
+            '16x16':0.2
         }
 
     def setup(self):
@@ -227,9 +227,12 @@ class Trainer(object):
                 loss.backward()
                 self.optimizer.step()
 
-                # Use weighted combination of all scales for count prediction
-                weighted_density = self.compute_weighted_count(mu_4x4, mu_8x8, mu_16x16)
-                pred_count = torch.sum(weighted_density.view(N, -1), dim=1).detach().cpu().numpy()
+                # In the training loop
+                # Use average combination of all scales for count prediction
+                avg_pred_count = (torch.sum(mu_4x4.view(N, -1), dim=1) +
+                                torch.sum(mu_8x8.view(N, -1), dim=1) +
+                                torch.sum(mu_16x16.view(N, -1), dim=1)) / 3
+                pred_count = avg_pred_count.detach().cpu().numpy()
                 pred_err = pred_count - gd_count
 
                 # Update metrics
@@ -249,8 +252,6 @@ class Trainer(object):
                         epoch_ot_obj_value.get_avg(), epoch_count_loss.get_avg(), epoch_tv_loss.get_avg(),
                         np.sqrt(epoch_mse.get_avg()), epoch_mae.get_avg(),
                         time.time() - epoch_start))
-
-        # Save checkpoint
         model_state_dic = self.model.state_dict()
         save_path = os.path.join(self.save_dir, '{}_ckpt.tar'.format(self.epoch))
         torch.save({
@@ -259,6 +260,8 @@ class Trainer(object):
             'model_state_dict': model_state_dic
         }, save_path)
         self.save_list.append(save_path)
+
+    # In the validation function
     def val_epoch(self):
         epoch_start = time.time()
         self.model.eval()
@@ -271,25 +274,23 @@ class Trainer(object):
                 # Get predictions for all scales
                 (mu_4x4, _), (mu_8x8, _), (mu_16x16, _) = self.model(inputs)
                 
-                # Compute weighted density map
-                weighted_density = self.compute_weighted_count(mu_4x4, mu_8x8, mu_16x16)
-                pred_count = torch.sum(weighted_density).item()
+                # Compute average predicted count
+                pred_count = (torch.sum(mu_4x4).item() + torch.sum(mu_8x8).item() + torch.sum(mu_16x16).item()) / 3
                 res = count[0].item() - pred_count
                 epoch_res.append(res)
-
 
         epoch_res = np.array(epoch_res)
         mse = np.sqrt(np.mean(np.square(epoch_res)))
         mae = np.mean(np.abs(epoch_res))
         
         self.logger.info('Epoch {} Val, MSE: {:.2f} MAE: {:.2f}, Cost {:.1f} sec'
-                         .format(self.epoch, mse, mae, time.time() - epoch_start))
+                        .format(self.epoch, mse, mae, time.time() - epoch_start))
 
         if (2.0 * mse + mae) < (2.0 * self.best_mse + self.best_mae):
             self.best_mse = mse
             self.best_mae = mae
             self.logger.info("save best mse {:.2f} mae {:.2f} model epoch {}".format(self.best_mse,
-                                                                                     self.best_mae,
-                                                                                     self.epoch))
+                                                                                    self.best_mae,
+                                                                                    self.epoch))
             torch.save(self.model.state_dict(), os.path.join(self.save_dir, 'best_model_{}.pth'.format(self.best_count)))
             self.best_count += 1
