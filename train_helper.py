@@ -25,9 +25,9 @@ class Trainer(object):
     def __init__(self, args):
         self.args = args
         self.scale_weights = {
-            '4x4':1,  # or some other default weight
-            '8x8':1,
-            '16x16':1
+            '4x4':0.33,  # or some other default weight
+            '8x8':0.33,
+            '16x16':0.33
         }
 
     def setup(self):
