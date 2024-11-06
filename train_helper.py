@@ -8,6 +8,7 @@ from torch.utils.data import DataLoader
 from torch.utils.data.dataloader import default_collate
 import numpy as np
 from datetime import datetime
+from torch.cuda.amp import autocast, GradScaler  # For AMP
 
 from datasets.crowd import Crowd_qnrf, Crowd_nwpu, Crowd_sh
 from models import vgg19
@@ -27,6 +28,7 @@ def train_collate(batch):
 class Trainer:
     def __init__(self, args):
         self.args = args
+        self.scaler = GradScaler()  # Initialize AMP scaler
 
     def setup(self):
         args = self.args
@@ -171,49 +173,50 @@ class Trainer:
         epoch_start = time.time()
         self.model.train()
 
+        torch.cuda.empty_cache()  # Clear cache to free up memory
         for step, (inputs, points, gt_discrete) in enumerate(self.dataloaders["train"]):
             inputs, gt_discrete = inputs.to(self.device), gt_discrete.to(self.device)
-            outputs, outputs_normed = self.model(inputs)
 
-            # Initialize accumulation variables as scalars
-            total_ot_loss = 0.0  
-            total_count_loss = 0.0
-            total_tv_loss = 0.0
-            pred_counts, gd_counts = [], []
+            with autocast():  # Use autocast for mixed precision training
+                outputs, outputs_normed = self.model(inputs)
 
-            for i in range(inputs.size(0)):
-                outputs_i, outputs_normed_i, points_i = outputs[i].unsqueeze(0), outputs_normed[i].unsqueeze(0), points[i]
-                ot_loss_i, wd_i, ot_obj_value_i = self.compute_adaptive_hot_loss(outputs_i, outputs_normed_i, points_i)
-                
-                # Accumulate OT losses directly as float values
-                total_ot_loss += ot_loss_i * self.args.wot
-                total_count_loss += self.mae(outputs_i.sum().reshape(1), torch.tensor([len(points_i)], dtype=torch.float32).to(self.device))
+                total_ot_loss = 0.0  
+                total_count_loss = 0.0
+                total_tv_loss = 0.0
+                pred_counts, gd_counts = [], []
 
-                # Normalize gt_discrete and compute TV loss
-                gd_count_tensor_i = torch.tensor([len(points_i)], dtype=torch.float32).to(self.device).unsqueeze(1).unsqueeze(2).unsqueeze(3)
-                gt_discrete_normed_i = gt_discrete[i].unsqueeze(0) / (gd_count_tensor_i + 1e-6)
-                tv_loss_i = (self.tv_loss(outputs_normed_i, gt_discrete_normed_i).sum() * gd_count_tensor_i.item()).mean(0) * self.args.wtv
-                total_tv_loss += tv_loss_i
+                for i in range(inputs.size(0)):
+                    outputs_i, outputs_normed_i, points_i = outputs[i].unsqueeze(0), outputs_normed[i].unsqueeze(0), points[i]
+                    ot_loss_i, wd_i, ot_obj_value_i = self.compute_adaptive_hot_loss(outputs_i, outputs_normed_i, points_i)
+                    
+                    total_ot_loss += ot_loss_i * self.args.wot
+                    total_count_loss += self.mae(outputs_i.sum().reshape(1), torch.tensor([len(points_i)], dtype=torch.float32).to(self.device))
 
-                # Update metrics for each image
-                epoch_ot_loss.update(float(ot_loss_i))
-                epoch_wd.update(float(wd_i))
-                epoch_ot_obj_value.update(float(ot_obj_value_i))
-                epoch_count_loss.update(float(total_count_loss))
-                epoch_tv_loss.update(float(tv_loss_i))
+                    # Normalize gt_discrete and compute TV loss
+                    gd_count_tensor_i = torch.tensor([len(points_i)], dtype=torch.float32).to(self.device).unsqueeze(1).unsqueeze(2).unsqueeze(3)
+                    gt_discrete_normed_i = gt_discrete[i].unsqueeze(0) / (gd_count_tensor_i + 1e-6)
+                    tv_loss_i = (self.tv_loss(outputs_normed_i, gt_discrete_normed_i).sum() * gd_count_tensor_i.item()).mean(0) * self.args.wtv
+                    total_tv_loss += tv_loss_i
 
-                # Store predicted and ground truth counts for error metrics
-                pred_counts.append(outputs_i.sum().item())
-                gd_counts.append(len(points_i))
+                    # Update metrics for each image
+                    epoch_ot_loss.update(float(ot_loss_i))
+                    epoch_wd.update(float(wd_i))
+                    epoch_ot_obj_value.update(float(ot_obj_value_i))
+                    epoch_count_loss.update(float(total_count_loss))
+                    epoch_tv_loss.update(float(tv_loss_i))
 
-            # Calculate total loss and backpropagate
-            loss = total_ot_loss + total_count_loss + total_tv_loss
-            loss_tensor = torch.tensor(loss, requires_grad=True, device=self.device)
+                    # Store predicted and ground truth counts for error metrics
+                    pred_counts.append(outputs_i.sum().item())
+                    gd_counts.append(len(points_i))
+
+                loss = total_ot_loss + total_count_loss + total_tv_loss
+
+            # AMP scaling and optimizer step
             self.optimizer.zero_grad()
-            loss_tensor.backward()
-            self.optimizer.step()
+            self.scaler.scale(loss).backward()
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
 
-            # Compute epoch-level error metrics
             pred_counts, gd_counts = np.array(pred_counts), np.array(gd_counts)
             pred_err = pred_counts - gd_counts
             epoch_mse.update(np.mean(pred_err ** 2), len(pred_counts))
